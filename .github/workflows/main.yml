@@ -28,20 +28,20 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      - name: Build Clean App Structure
+      - name: Build App Project
         run: |
-          flutter create --org com.salati app
+          flutter create --org com.salati.app app
 
-          # نسخ ملف الصوت
+          # نسخ ملف الصوت azan.mp3
           mkdir -p app/assets
           find temp_src -name "*.mp3" -exec cp {} app/assets/ \; || true
 
-          # ضبط pubspec بإصدارات مستقرة متوافقة مع السيرفر
+          # كتابة pubspec.yaml بجميع الحزم التي يستخدمها كودك
           cat << 'EOF' > app/pubspec.yaml
           name: salati_app
           description: Salati Prayer Times App
           publish_to: 'none'
-          version: 1.0.0+1
+          version: 1.2.1+1
 
           environment:
             sdk: '>=3.0.0 <4.0.0'
@@ -50,149 +50,551 @@ jobs:
             flutter:
               sdk: flutter
             audioplayers: 5.2.1
+            http: ^1.2.0
+            url_launcher: ^6.2.5
 
           flutter:
             uses-material-design: true
             assets:
               - assets/
+              - assets/azan.mp3
           EOF
 
-          # كود التطبيق السليم
+          # كتابة كود main.dart الأصلي بعد تصحيح سطر الاستيراد
           cat << 'EOF' > app/lib/main.dart
+          import 'dart:async';
+          import 'dart:convert';
           import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:http/http.dart' as http;
           import 'package:audioplayers/audioplayers.dart';
+          import 'package:url_launcher/url_launcher.dart';
+
+          const String currentAppVersion = "1.2.1";
+          const MethodChannel _settingsChannel = MethodChannel('com.salati.app/settings');
+
+          const List<String> whatsNewUrls = [
+            'https://cdn.jsdelivr.net/gh/abdalrhman12a12-ux/salati-app@main/whats_new.txt',
+            'https://raw.githubusercontent.com/abdalrhman12a12-ux/salati-app/main/whats_new.txt',
+          ];
+          const List<String> versionUrls = [
+            'https://cdn.jsdelivr.net/gh/abdalrhman12a12-ux/salati-app@main/version.json',
+            'https://raw.githubusercontent.com/abdalrhman12a12-ux/salati-app/main/version.json',
+          ];
+          const List<String> duasUrls = [
+            'https://cdn.jsdelivr.net/gh/abdalrhman12a12-ux/salati-app@main/duas.txt',
+            'https://raw.githubusercontent.com/abdalrhman12a12-ux/salati-app/main/duas.txt',
+          ];
+
+          class AdhanManager {
+            static final AdhanManager instance = AdhanManager._internal();
+            AdhanManager._internal();
+            final AudioPlayer _player = AudioPlayer();
+            bool isPlaying = false;
+            bool isSoundEnabled = true;
+            VoidCallback? onStateChanged;
+
+            Future<void> play() async {
+              if (!isSoundEnabled) return;
+              try {
+                await _player.stop();
+                await _player.setVolume(1.0);
+                await _player.play(AssetSource('azan.mp3'));
+                isPlaying = true;
+                onStateChanged?.call();
+                _player.onPlayerComplete.listen((_) {
+                  isPlaying = false;
+                  onStateChanged?.call();
+                });
+              } catch (_) {}
+            }
+
+            Future<void> stop() async {
+              try {
+                await _player.stop();
+                await _settingsChannel.invokeMethod('stopAzan');
+                isPlaying = false;
+                onStateChanged?.call();
+              } catch (_) {}
+            }
+          }
 
           void main() {
+            WidgetsFlutterBinding.ensureInitialized();
             runApp(const SalatiApp());
           }
 
           class SalatiApp extends StatelessWidget {
             const SalatiApp({super.key});
-
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
-                title: 'تطبيق صلاتي',
+                title: 'صلاتي',
                 debugShowCheckedModeBanner: false,
                 theme: ThemeData(
-                  primarySwatch: Colors.teal,
-                  fontFamily: 'sans-serif',
+                  brightness: Brightness.dark,
+                  scaffoldBackgroundColor: const Color(0xFF0F172A),
+                  primaryColor: const Color(0xFF10B981),
                 ),
-                home: const HomeScreen(),
+                builder: (context, child) => Directionality(textDirection: TextDirection.rtl, child: child!),
+                home: const MainNavigationScreen(),
               );
             }
           }
 
-          class HomeScreen extends StatefulWidget {
-            const HomeScreen({super.key});
-
+          class MainNavigationScreen extends StatefulWidget {
+            const MainNavigationScreen({super.key});
             @override
-            State<HomeScreen> createState() => _HomeScreenState();
+            State<MainNavigationScreen> createState() => _MainNavigationScreenState();
           }
 
-          class _HomeScreenState extends State<HomeScreen> {
-            final AudioPlayer _player = AudioPlayer();
-            bool _isPlaying = false;
+          class _MainNavigationScreenState extends State<MainNavigationScreen> {
+            int _currentIndex = 0;
+            final List<Widget> _screens = const [HomeScreen(), DuasScreen(), SebhaScreen(), WhatsNewScreen(), SettingsScreen()];
 
-            final List<Map<String, String>> _prayers = [
-              {'name': 'الفجر', 'time': '04:45 ص'},
-              {'name': 'الشروق', 'time': '06:10 ص'},
-              {'name': 'الظهر', 'time': '12:30 م'},
-              {'name': 'العصر', 'time': '03:45 م'},
-              {'name': 'المغرب', 'time': '06:20 م'},
-              {'name': 'العشاء', 'time': '07:50 م'},
-            ];
+            @override
+            void initState() {
+              super.initState();
+              AdhanManager.instance.onStateChanged = () { if (mounted) setState(() {}); };
+              HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _showXiaomiDialog();
+                _checkUpdate();
+              });
+            }
 
-            Future<void> _playAzan() async {
-              if (_isPlaying) {
-                await _player.stop();
-                setState(() => _isPlaying = false);
-              } else {
-                try {
-                  await _player.play(AssetSource('azan.mp3'));
-                  setState(() => _isPlaying = true);
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('تعذر تشغيل ملف الأذان')),
-                  );
+            bool _handleKeyEvent(KeyEvent event) {
+              if (event is KeyDownEvent && (event.logicalKey == LogicalKeyboardKey.audioVolumeDown || event.logicalKey == LogicalKeyboardKey.audioVolumeUp)) {
+                if (AdhanManager.instance.isPlaying) {
+                  AdhanManager.instance.stop();
+                  return true;
                 }
+              }
+              return false;
+            }
+
+            void _showXiaomiDialog() {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1E293B),
+                  title: const Text('تفعيل أذان الخلفية والجيب', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('لضمان عمل الأذان والشاشة مقفلة، فعّل الخيارات التالية:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                      const SizedBox(height: 12),
+                      ElevatedButton(onPressed: () => _settingsChannel.invokeMethod('openNotificationSettings'), child: const Text('🔔 1. الإشعارات والصوت')),
+                      const SizedBox(height: 8),
+                      ElevatedButton(onPressed: () => _settingsChannel.invokeMethod('openBatterySettings'), child: const Text('🔋 2. البطارية (لا توجد قيود)')),
+                      const SizedBox(height: 8),
+                      ElevatedButton(onPressed: () => _settingsChannel.invokeMethod('openAutostartSettings'), child: const Text('🔄 3. التشغيل التلقائي')),
+                    ],
+                  ),
+                  actions: [
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+                      child: const Text('✅ تم الضبط .. متابعة', style: TextStyle(color: Colors.white)),
+                    )
+                  ],
+                ),
+              );
+            }
+
+            Future<void> _checkUpdate() async {
+              for (String u in versionUrls) {
+                try {
+                  final res = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 3));
+                  if (res.statusCode == 200) {
+                    final d = json.decode(utf8.decode(res.bodyBytes));
+                    if (d['latest_version'] != currentAppVersion && (d['force_update'] ?? false) && mounted) {
+                      showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (c) => AlertDialog(
+                          title: const Text('تحديث جديد إجباري'),
+                          content: Text(d['update_notes'] ?? 'يرجى التحديث للمتابعة.'),
+                          actions: [
+                            ElevatedButton(
+                              onPressed: () => launchUrl(Uri.parse(d['apk_url'] ?? ''), mode: LaunchMode.externalApplication),
+                              child: const Text('تحديث الآن'),
+                            )
+                          ],
+                        ),
+                      );
+                      break;
+                    }
+                  }
+                } catch (_) {}
               }
             }
 
             @override
             void dispose() {
-              _player.dispose();
+              HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
               super.dispose();
             }
 
             @override
             Widget build(BuildContext context) {
               return Scaffold(
-                appBar: AppBar(
-                  title: const Text('صلاتي'),
-                  centerTitle: true,
-                  backgroundColor: Colors.teal[800],
+                body: Stack(
+                  children: [
+                    _screens[_currentIndex],
+                    if (AdhanManager.instance.isPlaying)
+                      Positioned(
+                        bottom: 15, left: 15, right: 15,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade900, padding: const EdgeInsets.all(16)),
+                          onPressed: () => AdhanManager.instance.stop(),
+                          icon: const Icon(Icons.volume_off, color: Colors.white),
+                          label: const Text('الأذان يعمل الآن .. اضغط للإسكات', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                  ],
                 ),
-                body: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      Card(
-                        elevation: 4,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                        color: Colors.teal[50],
-                        child: Padding(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Column(
-                            children: [
-                              const Icon(Icons.mosque, size: 60, color: Colors.teal),
-                              const SizedBox(height: 10),
-                              const Text(
-                                'مواقيت الصلاة والأذان',
-                                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.teal),
-                              ),
-                              const SizedBox(height: 15),
-                              ElevatedButton.icon(
-                                onPressed: _playAzan,
-                                icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
-                                label: Text(_isPlaying ? 'إيقاف الأذان' : 'تجربة صوت الأذان'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.teal,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                bottomNavigationBar: NavigationBar(
+                  selectedIndex: _currentIndex,
+                  backgroundColor: const Color(0xFF0F172A),
+                  indicatorColor: const Color(0xFF10B981).withOpacity(0.2),
+                  onDestinationSelected: (i) => setState(() => _currentIndex = i),
+                  destinations: const [
+                    NavigationDestination(icon: Icon(Icons.mosque), label: 'الرئيسية'),
+                    NavigationDestination(icon: Icon(Icons.auto_stories), label: 'أدعية'),
+                    NavigationDestination(icon: Icon(Icons.fingerprint), label: 'التسبيح'),
+                    NavigationDestination(icon: Icon(Icons.campaign), label: 'ما الجديد'),
+                    NavigationDestination(icon: Icon(Icons.settings), label: 'الإعدادات'),
+                  ],
+                ),
+              );
+            }
+          }
+
+          class HomeScreen extends StatefulWidget {
+            const HomeScreen({super.key});
+            @override
+            State<HomeScreen> createState() => _HomeScreenState();
+          }
+
+          class _HomeScreenState extends State<HomeScreen> {
+            Timer? _timer;
+            int _lastMin = -1;
+            final List<Map<String, dynamic>> _prayers = [
+              {'name': 'صلاة الفجر', 'timeStr': '5:29 ص', 'hour': 5, 'minute': 29},
+              {'name': 'الشروق', 'timeStr': '6:45 ص', 'hour': 6, 'minute': 45},
+              {'name': 'صلاة الظهر', 'timeStr': '12:16 م', 'hour': 12, 'minute': 16},
+              {'name': 'صلاة العصر', 'timeStr': '3:21 م', 'hour': 15, 'minute': 21},
+              {'name': 'صلاة المغرب', 'timeStr': '5:46 م', 'hour': 17, 'minute': 46},
+              {'name': 'صلاة العشاء', 'timeStr': '7:15 م', 'hour': 19, 'minute': 15},
+            ];
+            String _nextName = '';
+            String _remaining = '00:00:00';
+
+            @override
+            void initState() {
+              super.initState();
+              _startTimer();
+              _syncAlarms();
+            }
+
+            void _syncAlarms() {
+              try {
+                final list = _prayers.where((p) => p['name'] != 'الشروق').toList();
+                _settingsChannel.invokeMethod('scheduleAlarms', {'prayers': list});
+              } catch (_) {}
+            }
+
+            void _startTimer() {
+              _calc();
+              _timer = Timer.periodic(const Duration(seconds: 1), (_) => _calc());
+            }
+
+            void _calc() {
+              final now = DateTime.now();
+              for (var p in _prayers) {
+                if (p['name'] == 'الشروق') continue;
+                if (now.hour == p['hour'] && now.minute == p['minute'] && _lastMin != now.minute) {
+                  _lastMin = now.minute;
+                  AdhanManager.instance.play();
+                }
+              }
+              DateTime? next;
+              String target = '';
+              for (var p in _prayers) {
+                if (p['name'] == 'الشروق') continue;
+                DateTime dt = DateTime(now.year, now.month, now.day, p['hour'], p['minute']);
+                if (dt.isAfter(now)) {
+                  next = dt;
+                  target = p['name'];
+                  break;
+                }
+              }
+              if (next == null) {
+                next = DateTime(now.year, now.month, now.day + 1, _prayers[0]['hour'], _prayers[0]['minute']);
+                target = _prayers[0]['name'];
+              }
+              final d = next.difference(now);
+              setState(() {
+                _nextName = target;
+                _remaining = '${d.inHours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+              });
+            }
+
+            @override
+            void dispose() {
+              _timer?.cancel();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('إعداد وتطوير: عبدالرحمن حسين', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        Text('صلاتي', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF142032),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFF59E0B)),
                       ),
-                      const SizedBox(height: 20),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: _prayers.length,
-                          itemBuilder: (context, index) {
-                            final prayer = _prayers[index];
-                            return Card(
-                              margin: const EdgeInsets.symmetric(vertical: 6),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              child: ListTile(
-                                leading: const Icon(Icons.access_time, color: Colors.teal),
-                                title: Text(
-                                  prayer['name']!,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                                ),
-                                trailing: Text(
-                                  prayer['time']!,
-                                  style: const TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                      child: const Column(
+                        children: [
+                          Text('🤲 هذا العمل صدقة جارية لروح والدي {حسين الرحمو}', style: TextStyle(color: Color(0xFFFBBF24), fontWeight: FontWeight.bold)),
+                          SizedBox(height: 4),
+                          Text('«اللهم اجعل قبره روضةً من رياض الجنة»', style: TextStyle(color: Colors.white, fontSize: 12)),
+                        ],
                       ),
-                    ],
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF064E3B),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        children: [
+                          Text('متبقي لـ $_nextName', style: const TextStyle(color: Colors.white70)),
+                          Text(_remaining, style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ..._prayers.map((p) => Card(
+                      color: const Color(0xFF1E293B),
+                      child: ListTile(
+                        title: Text(p['name'], style: const TextStyle(color: Colors.white)),
+                        trailing: Text(p['timeStr'], style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+                      ),
+                    )),
+                  ],
+                ),
+              );
+            }
+          }
+
+          class DuasScreen extends StatefulWidget {
+            const DuasScreen({super.key});
+            @override
+            State<DuasScreen> createState() => _DuasScreenState();
+          }
+
+          class _DuasScreenState extends State<DuasScreen> {
+            List<String> _duas = [
+              "اللهم اغفر لوالدي {حسين الرحمو} وارحمه وعافه واعف عنه وأكرم نزله.",
+              "رَبَّنَا آتِنَا فِي الدُّنْيَا حَسَنَةً وَفِي الآخِرَةِ حَسَنَةً وَقِنَا عَذَابَ النَّارِ.",
+              "لا إلهَ إلا أنتَ سُبحانَكَ إنِّي كُنتُ مِنَ الظَّالِمِينَ.",
+            ];
+
+            @override
+            void initState() {
+              super.initState();
+              _fetch();
+            }
+
+            Future<void> _fetch() async {
+              for (String u in duasUrls) {
+                try {
+                  final res = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 3));
+                  if (res.statusCode == 200) {
+                    final lines = utf8.decode(res.bodyBytes).split('\n').where((s) => s.trim().isNotEmpty).toList();
+                    if (lines.isNotEmpty && mounted) {
+                      setState(() => _duas = lines);
+                      break;
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return SafeArea(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _duas.length,
+                  itemBuilder: (c, i) => Card(
+                    color: const Color(0xFF1E293B),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      title: Text(_duas[i], style: const TextStyle(color: Colors.white, height: 1.6)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.copy, color: Color(0xFF10B981)),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: _duas[i]));
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم نسخ الدعاء')));
+                        },
+                      ),
+                    ),
                   ),
+                ),
+              );
+            }
+          }
+
+          class SebhaScreen extends StatefulWidget {
+            const SebhaScreen({super.key});
+            @override
+            State<SebhaScreen> createState() => _SebhaScreenState();
+          }
+
+          class _SebhaScreenState extends State<SebhaScreen> {
+            int _count = 0;
+            final List<String> _adhkar = ['سُبْحَانَ اللَّهِ', 'الْحَمْدُ لِلَّهِ', 'لَا إِلَهَ إِلَّا اللَّهُ', 'اللَّهُ أَكْبَرُ'];
+            int _idx = 0;
+
+            @override
+            Widget build(BuildContext context) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(_adhkar[_idx], style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.amberAccent)),
+                    const SizedBox(height: 20),
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        setState(() {
+                          _count++;
+                          if (_count == 33) {
+                            _count = 0;
+                            _idx = (_idx + 1) % _adhkar.length;
+                            HapticFeedback.vibrate();
+                          }
+                        });
+                      },
+                      child: CircleAvatar(
+                        radius: 60,
+                        backgroundColor: const Color(0xFF10B981),
+                        child: Text('$_count', style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(onPressed: () => setState(() => _count = 0), child: const Text('تصفير', style: TextStyle(color: Colors.white70))),
+                  ],
+                ),
+              );
+            }
+          }
+
+          class WhatsNewScreen extends StatefulWidget {
+            const WhatsNewScreen({super.key});
+            @override
+            State<WhatsNewScreen> createState() => _WhatsNewScreenState();
+          }
+
+          class _WhatsNewScreenState extends State<WhatsNewScreen> {
+            String _text = "صلاتي 1.2.1\n★ الأذان الرسمي كمنبه نظامي يعمل والشاشة مقفلة.\n★ إمكانية إسكات الأذان بأزرار الصوت أو اللمس.";
+
+            @override
+            void initState() {
+              super.initState();
+              _fetch();
+            }
+
+            Future<void> _fetch() async {
+              for (String u in whatsNewUrls) {
+                try {
+                  final res = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 3));
+                  if (res.statusCode == 200 && mounted) {
+                    setState(() => _text = utf8.decode(res.bodyBytes));
+                    break;
+                  }
+                } catch (_) {}
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(14)),
+                    child: SingleChildScrollView(child: Text(_text, style: const TextStyle(color: Colors.white, height: 1.8))),
+                  ),
+                ),
+              );
+            }
+          }
+
+          class SettingsScreen extends StatelessWidget {
+            const SettingsScreen({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    const Text('إعدادات الأذان والمنبه', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                    const SizedBox(height: 16),
+                    Card(
+                      color: const Color(0xFF1E293B),
+                      child: ListTile(
+                        title: const Text('⏱ تجربة المنبه بعد 20 ثانية (مع قفل الشاشة)', style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+                        subtitle: const Text('اضغط هنا ثم أقفل الشاشة فوراً لتجربة منبه الأندرويد الأصلي', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                        onTap: () {
+                          _settingsChannel.invokeMethod('testAlarmInSeconds', {'seconds': 20});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('أقفل شاشة هاتفك الآن فوراً! سينطلق المنبه بعد 20 ثانية')),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Card(
+                      color: const Color(0xFF1E293B),
+                      child: ListTile(
+                        title: const Text('إيقاف صوت المنبه فوراً', style: TextStyle(color: Colors.redAccent)),
+                        trailing: const Icon(Icons.stop_circle, color: Colors.redAccent),
+                        onTap: () => AdhanManager.instance.stop(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Card(
+                      color: const Color(0xFF1E293B),
+                      child: ListTile(
+                        title: const Text('فتح إعدادات بطارية شاومي المباشرة', style: TextStyle(color: Colors.white)),
+                        trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white54),
+                        onTap: () => _settingsChannel.invokeMethod('openBatterySettings'),
+                      ),
+                    ),
+                  ],
                 ),
               );
             }
