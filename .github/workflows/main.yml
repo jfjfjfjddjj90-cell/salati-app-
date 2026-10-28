@@ -32,7 +32,7 @@ jobs:
         run: |
           flutter create --org com.salati.app app
 
-          # نسخ ملف الصوت
+          # نسخ ملف الصوت azan.mp3
           mkdir -p app/assets
           find temp_src -name "*.mp3" -exec cp {} app/assets/ \; || true
 
@@ -60,13 +60,15 @@ jobs:
               - assets/azan.mp3
           EOF
 
-          # كود أندرويد الأصلي مع توجيه مباشر لكل اختصاص (بطارية، إشعارات، ظهور فوق التطبيقات)
+          # كود أندرويد الأصلي مع دعم مسارات شاومي وتجربة المنبه
           cat << 'EOF' > app/android/app/src/main/kotlin/com/salati/app/MainActivity.kt
           package com.salati.app
 
           import android.content.Intent
           import android.net.Uri
           import android.os.Build
+          import android.os.Handler
+          import android.os.Looper
           import android.provider.Settings
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
@@ -79,72 +81,85 @@ jobs:
                 super.configureFlutterEngine(flutterEngine)
                 MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
                   when (call.method) {
-                    "openBatterySettings" -> {
-                      try {
-                        val intent = Intent()
-                        intent.component = android.content.ComponentName("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
-                        intent.putExtra("package_name", packageName)
-                        intent.putExtra("package_label", "صلاتي")
+                    "testAlarmInSeconds" -> {
+                      val seconds = call.argument<Int>("seconds") ?: 20
+                      Handler(Looper.getMainLooper()).postDelayed({
+                        val intent = packageManager.getLaunchIntentForPackage(packageName)
+                        intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         startActivity(intent)
-                        result.success(true)
-                      } catch (e: Exception) {
-                        try {
-                          val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                          intent.data = Uri.parse("package:$packageName")
-                          startActivity(intent)
-                          result.success(true)
-                        } catch (ex: Exception) {
-                          val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                          startActivity(intent)
-                          result.success(true)
-                        }
-                      }
+                      }, (seconds * 1000).toLong())
+                      result.success(true)
                     }
                     "openNotificationSettings" -> {
+                      var launched = false
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                          val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          }
+                          startActivity(intent)
+                          launched = true
+                        } catch (_: Exception) {}
+                      }
+                      if (!launched) {
+                        try {
+                          val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:$packageName")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          }
+                          startActivity(intent)
+                        } catch (_: Exception) {}
+                      }
+                      result.success(true)
+                    }
+                    "openBatterySettings" -> {
+                      var launched = false
                       try {
-                        val intent = Intent()
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          intent.action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
-                          intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                        } else {
-                          intent.action = "android.settings.APP_NOTIFICATION_SETTINGS"
-                          intent.putExtra("app_package", packageName)
-                          intent.putExtra("app_uid", applicationInfo.uid)
+                        val intent = Intent().apply {
+                          component = android.content.ComponentName("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
+                          putExtra("package_name", packageName)
+                          putExtra("package_label", "صلاتي")
+                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         startActivity(intent)
-                        result.success(true)
-                      } catch (e: Exception) {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        intent.data = Uri.parse("package:$packageName")
-                        startActivity(intent)
-                        result.success(true)
+                        launched = true
+                      } catch (_: Exception) {}
+
+                      if (!launched) {
+                        try {
+                          val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          }
+                          startActivity(intent)
+                          launched = true
+                        } catch (_: Exception) {}
                       }
+
+                      if (!launched) {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                          data = Uri.parse("package:$packageName")
+                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                      }
+                      result.success(true)
                     }
                     "openOverlaySettings" -> {
                       try {
-                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                        intent.data = Uri.parse("package:$packageName")
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                          data = Uri.parse("package:$packageName")
+                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
                         startActivity(intent)
-                        result.success(true)
-                      } catch (e: Exception) {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        intent.data = Uri.parse("package:$packageName")
+                      } catch (_: Exception) {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                          data = Uri.parse("package:$packageName")
+                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
                         startActivity(intent)
-                        result.success(true)
                       }
-                    }
-                    "openAutostartSettings" -> {
-                      try {
-                        val intent = Intent()
-                        intent.component = android.content.ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")
-                        startActivity(intent)
-                        result.success(true)
-                      } catch (e: Exception) {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        intent.data = Uri.parse("package:$packageName")
-                        startActivity(intent)
-                        result.success(true)
-                      }
+                      result.success(true)
                     }
                     else -> result.notImplemented()
                   }
@@ -153,7 +168,7 @@ jobs:
           }
           EOF
 
-          # كتابة كود الواجهات مع توفير الأزرار المخصصة
+          # كتابة كود main.dart وتضمين أزرار الأذان التجريبي والشاشات بالكامل
           cat << 'EOF' > app/lib/main.dart
           import 'dart:async';
           import 'dart:convert';
@@ -251,7 +266,6 @@ jobs:
               AdhanManager.instance.onStateChanged = () { if (mounted) setState(() {}); };
               HardwareKeyboard.instance.addHandler(_handleKeyEvent);
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                _showXiaomiDialog();
                 _checkUpdate();
               });
             }
@@ -264,37 +278,6 @@ jobs:
                 }
               }
               return false;
-            }
-
-            void _showXiaomiDialog() {
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (ctx) => AlertDialog(
-                  backgroundColor: const Color(0xFF1E293B),
-                  title: const Text('تفعيل أذان الخلفية والجيب', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text('لضمان عمل الأذان والشاشة مقفلة، فعّل الأذونات التالية:', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                      const SizedBox(height: 12),
-                      ElevatedButton(onPressed: () => _settingsChannel.invokeMethod('openNotificationSettings'), child: const Text('🔔 1. الإشعارات والصوت')),
-                      const SizedBox(height: 8),
-                      ElevatedButton(onPressed: () => _settingsChannel.invokeMethod('openBatterySettings'), child: const Text('🔋 2. البطارية (لا توجد قيود)')),
-                      const SizedBox(height: 8),
-                      ElevatedButton(onPressed: () => _settingsChannel.invokeMethod('openOverlaySettings'), child: const Text('📱 3. الظهور فوق التطبيقات')),
-                    ],
-                  ),
-                  actions: [
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
-                      child: const Text('✅ تم الضبط .. متابعة', style: TextStyle(color: Colors.white)),
-                    )
-                  ],
-                ),
-              );
             }
 
             Future<void> _checkUpdate() async {
@@ -511,7 +494,7 @@ jobs:
             }
 
             Future<void> _fetch() async {
-              for (String u in duasUrls) {
+              for (String u in ScreenUrls.duas) {
                 try {
                   final res = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 3));
                   if (res.statusCode == 200) {
@@ -548,6 +531,10 @@ jobs:
                 ),
               );
             }
+          }
+
+          class ScreenUrls {
+            static const List<String> duas = duasUrls;
           }
 
           class SebhaScreen extends StatefulWidget {
@@ -646,8 +633,44 @@ jobs:
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    const Text('أذونات عمل التطبيق في الخلفية', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                    const Text('تجربة الأذان والمنبه', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
                     const SizedBox(height: 14),
+                    Card(
+                      color: const Color(0xFF142032),
+                      child: ListTile(
+                        leading: const Icon(Icons.volume_up, color: Color(0xFF10B981)),
+                        title: const Text('🔊 تشغيل الأذان التجريبي فوراً', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        subtitle: const Text('اضغط هنا للاستماع لملف الأذان والتأكد من الصوت', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                        onTap: () => AdhanManager.instance.play(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Card(
+                      color: const Color(0xFF142032),
+                      child: ListTile(
+                        leading: const Icon(Icons.timer, color: Colors.amberAccent),
+                        title: const Text('⏱ تجربة المنبه بعد 20 ثانية (مع قفل الشاشة)', style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+                        subtitle: const Text('اضغط هنا ثم أقفل الشاشة فوراً لتجربة التنبيه', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                        onTap: () {
+                          _settingsChannel.invokeMethod('testAlarmInSeconds', {'seconds': 20});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('أقفل شاشة هاتفك الآن فوراً! سينطلق المنبه بعد 20 ثانية')),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Card(
+                      color: const Color(0xFF1E293B),
+                      child: ListTile(
+                        leading: const Icon(Icons.stop_circle, color: Colors.redAccent),
+                        title: const Text('إيقاف صوت الأذان فوراً', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                        onTap: () => AdhanManager.instance.stop(),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text('أذونات عمل التطبيق في الخلفية', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white70)),
+                    const SizedBox(height: 10),
                     Card(
                       color: const Color(0xFF1E293B),
                       child: ListTile(
@@ -678,15 +701,6 @@ jobs:
                         subtitle: const Text('يفتح إذن الظهور مباشرة لعرض التنبيه والشاشة مقفلة', style: TextStyle(color: Colors.white60, fontSize: 12)),
                         trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white54),
                         onTap: () => _settingsChannel.invokeMethod('openOverlaySettings'),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Card(
-                      color: const Color(0xFF1E293B),
-                      child: ListTile(
-                        leading: const Icon(Icons.stop_circle, color: Colors.redAccent),
-                        title: const Text('إيقاف صوت الأذان فوراً', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                        onTap: () => AdhanManager.instance.stop(),
                       ),
                     ),
                   ],
