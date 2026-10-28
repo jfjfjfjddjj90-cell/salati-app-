@@ -22,6 +22,11 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
+      - name: Install Android Platform 35
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -32,16 +37,16 @@ jobs:
         run: |
           flutter create --org com.salati app
           
-          # إعدادات الأندرويد المطلوبة
+          # إعدادات الأندرويد
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' app/android/app/build.gradle
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' app/android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' app/android/app/build.gradle
 
-          # إنشاء مجلد assets ونسخ ملفات الصوت إليه
+          # نسخ ملف الصوت
           mkdir -p app/assets
           find temp_src -name "*.mp3" -exec cp {} app/assets/ \; || true
 
-          # كتابة pubspec.yaml
+          # ضبط pubspec.yaml
           cat << 'EOF' > app/pubspec.yaml
           name: salati_app
           description: Salati Prayer Times App
@@ -65,11 +70,10 @@ jobs:
               - assets/
           EOF
 
-          # كتابة كود التطبيق main.dart كاملاً ونظيفاً ومضبوط الأقواس
+          # كتابة كود التطبيق المكتمل والسليم
           cat << 'EOF' > app/lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:audioplayers/audioplayers.dart';
-          import 'package:shared_preferences/shared_preferences.dart';
 
           void main() {
             runApp(const SalatiApp());
