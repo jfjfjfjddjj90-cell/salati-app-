@@ -15,7 +15,6 @@ jobs:
         run: |
           mkdir -p temp_src
           unzip -o "مجلد جديد.zip" -d temp_src/
-          find temp_src -type f
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -31,17 +30,20 @@ jobs:
 
       - name: Scaffold Flutter App & Inject Code
         run: |
-          # 1. Create a fresh standard Flutter project
           flutter create --org com.salati app
           
-          # 2. Copy pubspec.yaml
+          # نقل ملف الإعدادات والكود
           find temp_src -name "pubspec.yaml" -exec cp {} app/pubspec.yaml \;
-          
-          # 3. Copy main.dart
           find temp_src -name "main.dart" -exec cp {} app/lib/main.dart \;
-          
-          # 4. Copy assets folder if exists
           find temp_src -type d -name "assets" -exec cp -r {} app/ \;
+
+          # تصحيح خطأ children داخل Padding تلقائياً
+          sed -i 's/const Padding(/Padding(/g' app/lib/main.dart
+          sed -i 's/children: \[/child: Column(children: \[/g' app/lib/main.dart
+
+          # رفع إصدار SDK إلى 35 المطلوب
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' app/android/app/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' app/android/app/build.gradle
 
       - name: Build APK
         working-directory: app
