@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract Assets
+      - name: Extract User Code
         run: |
           mkdir -p temp_src
           unzip -o "مجلد جديد.zip" -d temp_src/
@@ -28,19 +28,19 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
 
-      - name: Create Clean App
+      - name: Prepare Clean Project
         run: |
           flutter create --org com.salati app
           
-          # رفع إصدار SDK
+          # ضبط إصدارات الأندرويد المطلوبة
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' app/android/app/build.gradle
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' app/android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' app/android/app/build.gradle
 
-          # نسخ مجلد الصوتيات assets إذا كان موجوداً
+          # نسخ مجلد الصوتيات
           find temp_src -type d -name "assets" -exec cp -r {} app/ \;
 
-          # كتابة pubspec.yaml المتوافق
+          # كتابة ملف pubspec.yaml
           cat << 'EOF' > app/pubspec.yaml
           name: salati_app
           description: Salati Prayer Times App
@@ -64,11 +64,22 @@ jobs:
               - assets/
           EOF
 
-          # نسخ main.dart المصحح بدقة
+          # نسخ ملف main.dart الأصلي
           find temp_src -name "main.dart" -exec cp {} app/lib/main.dart \;
-          # تصحيح الـ Padding المعطوب فقط بدون لمس باقي العناصر
-          sed -i '470,475s/children:/child: Column(children:/' app/lib/main.dart || true
-          sed -i '470,475s/const Padding/Padding/' app/lib/main.dart || true
+          
+          # استبدال children بـ child في ويدجت Padding فقط
+          python3 -c "
+          with open('app/lib/main.dart', 'r', encoding='utf-8') as f:
+              content = f.read()
+          # تصحيح الخطأ الأصلي في Padding
+          content = content.replace('Padding(\n            padding: const EdgeInsets.all(16.0),\n            children: [', 'Padding(\n            padding: const EdgeInsets.all(16.0),\n            child: Column(\n              children: [')
+          content = content.replace('Padding(\n          padding: const EdgeInsets.all(16.0),\n          children: [', 'Padding(\n          padding: const EdgeInsets.all(16.0),\n          child: Column(\n            children: [')
+          # إضافة إغلاق الـ Column إذا لزم الأمر
+          if 'child: Column(' in content and not ')\n    );\n  }\n}' in content:
+              content = content.replace('      ],\n    );\n  }\n}', '      ],\n    )\n    );\n  }\n}')
+          with open('app/lib/main.dart', 'w', encoding='utf-8') as f:
+              f.write(content)
+          "
 
       - name: Build APK
         working-directory: app
