@@ -29,16 +29,30 @@ jobs:
           mkdir -p extracted_zip
           unzip -o "مجلد جديد.zip" -d extracted_zip
           
-          # نسخ ملفات المشروع الفعلي (lib, assets, pubspec.yaml) إلى مجلد البناء
           SRC_DIR=$(find extracted_zip -name "pubspec.yaml" -printf '%h\n' | head -n 1)
           cp -rf "$SRC_DIR/lib" salati_build/
-          cp -rf "$SRC_DIR/assets" salati_build/
+          if [ -d "$SRC_DIR/assets" ]; then cp -rf "$SRC_DIR/assets" salati_build/; fi
           cp -f "$SRC_DIR/pubspec.yaml" salati_build/
           
           cd salati_build
+          mkdir -p assets
+
+          # البحث عن أي صورة أيقونة في المشروع أو المستودع وتجهيزها
+          ICON_FILE=$(find .. -maxdepth 4 \( -iname "*icon*.png" -o -iname "*logo*.png" \) | head -n 1)
+          if [ -n "$ICON_FILE" ]; then
+            cp -f "$ICON_FILE" assets/icon.png
+          fi
+
+          flutter pub get
+
+          ICON_REF="@mipmap/ic_launcher"
+          if [ -f "assets/icon.png" ]; then
+            if dart run flutter_launcher_icons; then
+              ICON_REF="@mipmap/launcher_icon"
+            fi
+          fi
           
-          # إعداد AndroidManifest.xml بجميع الصلاحيات والاسم العربي
-          cat << 'EOF' > android/app/src/main/AndroidManifest.xml
+          cat << EOF > android/app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
@@ -53,8 +67,8 @@ jobs:
 
               <application
                   android:label="صلاتي"
-                  android:name="${applicationName}"
-                  android:icon="@mipmap/launcher_icon">
+                  android:name="\${applicationName}"
+                  android:icon="$ICON_REF">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -79,12 +93,12 @@ jobs:
           </manifest>
           EOF
 
-          # تفعيل coreLibraryDesugaring المطلوب للإشعارات المجدولة
+          # ضبط SDK 35 و minSdk 21 لضمان توافق جميع الإضافات
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' android/app/build.gradle
 
-          flutter pub get
-          dart run flutter_launcher_icons || true
           flutter build apk --release
 
       - name: Upload Salati APK
