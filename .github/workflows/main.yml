@@ -37,7 +37,6 @@ jobs:
           cd salati_build
           mkdir -p assets
 
-          # البحث عن أي صورة أيقونة في المشروع أو المستودع وتجهيزها
           ICON_FILE=$(find .. -maxdepth 4 \( -iname "*icon*.png" -o -iname "*logo*.png" \) | head -n 1)
           if [ -n "$ICON_FILE" ]; then
             cp -f "$ICON_FILE" assets/icon.png
@@ -93,11 +92,11 @@ jobs:
           </manifest>
           EOF
 
-          # ضبط SDK 35 و minSdk 21 لضمان توافق جميع الإضافات
+          # ضبط compileSdk 34 و minSdk 21 المتوافق تماماً مع Flutter 3.22.0
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
-          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' android/app/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle
 
           flutter build apk --release
 
