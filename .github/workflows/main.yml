@@ -92,7 +92,6 @@ jobs:
           </manifest>
           EOF
 
-          # تفعيل coreLibraryDesugaring وتحديث SDK و Kotlin ليتوافق مع جميع الحزم الحديثة
           cat << 'EOF' > android/app/build.gradle
           plugins {
               id "com.android.application"
@@ -106,7 +105,7 @@ jobs:
               ndkVersion = flutter.ndkVersion
 
               compileOptions {
-                  isCoreLibraryDesugaringEnabled = true
+                  coreLibraryDesugaringEnabled true
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
               }
@@ -121,14 +120,14 @@ jobs:
                   targetSdk = 35
                   versionCode = 6
                   versionName = "1.6.0"
-                  multiDexEnabled = true
+                  multiDexEnabled true
               }
 
               buildTypes {
                   release {
                       signingConfig = signingConfigs.debug
-                      isMinifyEnabled = false
-                      isShrinkResources = false
+                      minifyEnabled false
+                      shrinkResources false
                   }
               }
           }
@@ -138,7 +137,7 @@ jobs:
           }
 
           dependencies {
-              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+              coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
           }
           EOF
 
