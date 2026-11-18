@@ -1,4 +1,4 @@
-name: Build App Killer APK
+name: Build Salati APK
 
 on:
   push:
@@ -9,253 +9,86 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Java
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'zulu'
-        java-version: '17'
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
 
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.19.0'
-        channel: 'stable'
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: 'stable'
 
-    - name: Create & Configure Project
-      run: |
-        flutter create --org com.cleaner app
-        
-        # 1. تحديث AndroidManifest.xml لإضافة خدمة إمكانية الوصول
-        cat << 'EOF' > app/android/app/src/main/AndroidManifest.xml
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-            xmlns:tools="http://schemas.android.com/tools"
-            package="com.cleaner.app">
+      - name: Extract and Configure Salati Project
+        run: |
+          flutter create --org com.abuhussein.salati salati_build
+          mkdir -p extracted_zip
+          unzip -o "مجلد جديد.zip" -d extracted_zip
+          
+          # نسخ ملفات المشروع الفعلي (lib, assets, pubspec.yaml) إلى مجلد البناء
+          SRC_DIR=$(find extracted_zip -name "pubspec.yaml" -printf '%h\n' | head -n 1)
+          cp -rf "$SRC_DIR/lib" salati_build/
+          cp -rf "$SRC_DIR/assets" salati_build/
+          cp -f "$SRC_DIR/pubspec.yaml" salati_build/
+          
+          cd salati_build
+          
+          # إعداد AndroidManifest.xml بجميع الصلاحيات والاسم العربي
+          cat << 'EOF' > android/app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
-            <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+              <application
+                  android:label="صلاتي"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/launcher_icon">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"
+                        />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+              </application>
+          </manifest>
+          EOF
 
-            <application
-                android:label="إغلاق تطبيقات الخلفية"
-                android:name="${applicationName}"
-                android:icon="@mipmap/ic_launcher">
-                <activity
-                    android:name=".MainActivity"
-                    android:exported="true"
-                    android:launchMode="singleTop"
-                    android:theme="@style/LaunchTheme"
-                    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-                    android:hardwareAccelerated="true"
-                    android:windowSoftInputMode="adjustResize">
-                    <intent-filter>
-                        <action android:name="android.intent.action.MAIN"/>
-                        <category android:name="android.intent.category.LAUNCHER"/>
-                    </intent-filter>
-                </activity>
+          # تفعيل coreLibraryDesugaring المطلوب للإشعارات المجدولة
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
 
-                <!-- خدمة إمكانية الوصول للضغط التلقائي على إيقاف إجباري -->
-                <service
-                    android:name=".KillerAccessibilityService"
-                    android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-                    android:exported="true">
-                    <intent-filter>
-                        <action android:name="android.accessibilityservice.AccessibilityService" />
-                    </intent-filter>
-                    <meta-data
-                        android:name="android.accessibilityservice"
-                        android:resource="@xml/service_config" />
-                </service>
+          flutter pub get
+          dart run flutter_launcher_icons || true
+          flutter build apk --release
 
-                <meta-data
-                    android:name="flutterEmbedding"
-                    android:value="2" />
-            </application>
-        </manifest>
-        EOF
-
-        # 2. إنشاء ملف إعدادات الخدمة service_config.xml
-        mkdir -p app/android/app/src/main/res/xml
-        cat << 'EOF' > app/android/app/src/main/res/xml/service_config.xml
-        <?xml version="1.0" encoding="utf-8"?>
-        <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-            android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
-            android:accessibilityFeedbackType="feedbackGeneric"
-            android:notificationTimeout="100"
-            android:canRetrieveWindowContent="true"
-            android:accessibilityFlags="flagDefault" />
-        EOF
-
-        # 3. إنشاء كود خدمة إمكانية الوصول بلغة Kotlin
-        cat << 'EOF' > app/android/app/src/main/kotlin/com/cleaner/app/KillerAccessibilityService.kt
-        package com.cleaner.app
-
-        import android.accessibilityservice.AccessibilityService
-        import android.view.accessibility.AccessibilityEvent
-        import android.view.accessibility.AccessibilityNodeInfo
-
-        class KillerAccessibilityService : AccessibilityService() {
-            override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                val rootNode = rootInActiveWindow ?: return
-
-                val stopKeywords = listOf("فرض الإيقاف", "إيقاف إجباري", "Force stop", "FORCE STOP")
-                val confirmKeywords = listOf("موافق", "حسناً", "OK", "Ok")
-
-                for (keyword in stopKeywords) {
-                    val nodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-                    for (node in nodes) {
-                        if (node.isClickable && node.isEnabled) {
-                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            return
-                        }
-                    }
-                }
-
-                for (keyword in confirmKeywords) {
-                    val dialogNodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-                    for (node in dialogNodes) {
-                        if (node.isClickable && node.isEnabled) {
-                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            performGlobalAction(GLOBAL_ACTION_BACK)
-                            return
-                        }
-                    }
-                }
-            }
-
-            override fun onInterrupt() {}
-        }
-        EOF
-
-        # 4. واجهة فلاتر للتحكم
-        cat << 'EOF' > app/lib/main.dart
-        import 'package:flutter/material.dart';
-        import 'package:flutter/services.dart';
-
-        void main() {
-          runApp(const MyApp());
-        }
-
-        class MyApp extends StatelessWidget {
-          const MyApp({super.key});
-
-          @override
-          Widget build(BuildContext context) {
-            return MaterialApp(
-              debugShowCheckedModeBanner: false,
-              title: 'متحكم الخلفية',
-              theme: ThemeData(
-                primarySwatch: Colors.green,
-                scaffoldBackgroundColor: const Color(0xFF1E1E1E),
-                textTheme: const TextTheme(
-                  bodyMedium: TextStyle(color: Colors.white),
-                ),
-              ),
-              home: const HomeScreen(),
-            );
-          }
-        }
-
-        class HomeScreen extends StatelessWidget {
-          const HomeScreen({super.key});
-
-          static const platform = MethodChannel('com.cleaner.app/actions');
-
-          @override
-          Widget build(BuildContext context) {
-            return Scaffold(
-              appBar: AppBar(
-                title: const Text('إغلاق تطبيقات الخلفية'),
-                centerTitle: true,
-                backgroundColor: const Color(0xFF2C2C2C),
-              ),
-              body: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Icon(
-                      Icons.cleaning_services_rounded,
-                      size: 90,
-                      color: Colors.greenAccent,
-                    ),
-                    const SizedBox(height: 30),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      icon: const Icon(Icons.security, color: Colors.white),
-                      label: const Text(
-                        '1. تفعيل صلاحية إمكانية الوصول',
-                        style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: () {
-                        platform.invokeMethod('openAccessibility');
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueGrey,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      icon: const Icon(Icons.apps, color: Colors.white),
-                      label: const Text(
-                        '2. فتح قائمة التطبيقات للإيقاف',
-                        style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: () {
-                        platform.invokeMethod('openAppSettings');
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-        }
-        EOF
-
-        # 5. ربط أوامر الفلاتر بنظام أندرويد عبر MainActivity.kt
-        cat << 'EOF' > app/android/app/src/main/kotlin/com/cleaner/app/MainActivity.kt
-        package com.cleaner.app
-
-        import android.content.Intent
-        import android.provider.Settings
-        import io.flutter.embedding.android.FlutterActivity
-        import io.flutter.embedding.engine.FlutterEngine
-        import io.flutter.plugin.common.MethodChannel
-
-        class MainActivity: FlutterActivity() {
-            private val CHANNEL = "com.cleaner.app/actions"
-
-            override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                super.configureFlutterEngine(flutterEngine)
-                MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-                    when (call.method) {
-                        "openAccessibility" -> {
-                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            result.success(null)
-                        }
-                        "openAppSettings" -> {
-                            startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS))
-                            result.success(null)
-                        }
-                        else -> result.notImplemented()
-                    }
-                }
-            }
-        }
-        EOF
-
-    - name: Build APK
-      run: |
-        cd app
-        flutter build apk --release
-
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AppKiller-Release
-        path: app/build/app/outputs/flutter-apk/app-release.apk
+      - name: Upload Salati APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Salati-1.6.0-Release
+          path: salati_build/build/app/outputs/flutter-apk/app-release.apk
