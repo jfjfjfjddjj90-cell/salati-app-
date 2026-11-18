@@ -20,7 +20,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.27.4'
           channel: 'stable'
 
       - name: Extract and Configure Salati Project
@@ -92,11 +92,55 @@ jobs:
           </manifest>
           EOF
 
-          # ضبط compileSdk 34 و minSdk 21 المتوافق تماماً مع Flutter 3.22.0
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
-          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle
+          # تفعيل coreLibraryDesugaring وتحديث SDK و Kotlin ليتوافق مع جميع الحزم الحديثة
+          cat << 'EOF' > android/app/build.gradle
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+
+          android {
+              namespace = "com.abuhussein.salati.salati_build"
+              compileSdk = 35
+              ndkVersion = flutter.ndkVersion
+
+              compileOptions {
+                  isCoreLibraryDesugaringEnabled = true
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = JavaVersion.VERSION_17
+              }
+
+              defaultConfig {
+                  applicationId = "com.abuhussein.salati.salati_build"
+                  minSdk = 21
+                  targetSdk = 35
+                  versionCode = 6
+                  versionName = "1.6.0"
+                  multiDexEnabled = true
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.debug
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                  }
+              }
+          }
+
+          flutter {
+              source = "../.."
+          }
+
+          dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+          }
+          EOF
 
           flutter build apk --release
 
